@@ -1,0 +1,10 @@
+[
+  {
+    "level": 1,
+    "enemy_id": "slime"
+  },
+  {
+    "level": 2,
+    "enemy_id": "goblin"
+  }
+]
