@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>杀戮有限状态机 - Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: grab;
+        }
+        .card:hover {
+            transform: translateY(-20px) scale(1.1);
+            z-index: 50;
+        }
+        .card:active {
+            cursor: grabbing;
+        }
+        .hp-bar-inner {
+            transition: width 0.5s ease-in-out;
+        }
+        body {
+            background-color: #1a1a1a;
+            color: white;
+            overflow: hidden;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        .status-badge {
+            font-size: 0.7rem;
+            padding: 2px 4px;
+            border-radius: 4px;
+            margin-right: 2px;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="p-4 flex justify-between items-center bg-black/50 border-b border-gray-700">
+        <div class="text-xl font-bold text-yellow-500">杀戮 FSM (Slay the FSM)</div>
+        <div id="level-display" class="text-lg">第 1 关</div>
+        <div id="turn-display" class="text-lg">第 1 回合</div>
+        <div class="flex items-center gap-4">
+            <span id="fsm-state" class="px-3 py-1 bg-blue-600 rounded-full text-sm">状态: 玩家回合</span>
+        </div>
+    </header>
+
+    <!-- Battle Arena -->
+    <main class="flex-grow flex justify-around items-center relative">
+        <!-- Player -->
+        <div class="flex flex-col items-center gap-4">
+            <div id="player-status" class="flex gap-1 mb-2"></div>
+            <div class="w-32 h-48 bg-blue-900 rounded-lg flex items-center justify-center border-4 border-blue-400 shadow-lg shadow-blue-500/50 relative">
+                <span class="text-4xl">🛡️</span>
+                <div id="player-shield" class="absolute -top-4 -right-4 bg-gray-600 text-white px-2 py-1 rounded border-2 border-white font-bold hidden">0</div>
+            </div>
+            <div class="w-48">
+                <div class="flex justify-between text-sm mb-1">
+                    <span id="player-name">勇者</span>
+                    <span id="player-hp-text">50 / 50</span>
+                </div>
+                <div class="w-full bg-gray-700 h-4 rounded-full overflow-hidden border border-gray-600">
+                    <div id="player-hp-bar" class="hp-bar-inner bg-red-600 h-full" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Enemy -->
+        <div class="flex flex-col items-center gap-4">
+            <div id="enemy-status" class="flex gap-1 mb-2"></div>
+            <div class="w-32 h-48 bg-red-900 rounded-lg flex items-center justify-center border-4 border-red-400 shadow-lg shadow-red-500/50 relative">
+                <span id="enemy-icon" class="text-4xl">👹</span>
+                <div id="enemy-shield" class="absolute -top-4 -right-4 bg-gray-600 text-white px-2 py-1 rounded border-2 border-white font-bold hidden">0</div>
+                <div id="enemy-state-tag" class="absolute -bottom-4 bg-red-600 text-[10px] px-2 py-0.5 rounded border border-white hidden">狂暴</div>
+            </div>
+            <div class="w-48">
+                <div class="flex justify-between text-sm mb-1">
+                    <span id="enemy-name">史莱姆</span>
+                    <span id="enemy-hp-text">50 / 50</span>
+                </div>
+                <div class="w-full bg-gray-700 h-4 rounded-full overflow-hidden border border-gray-600">
+                    <div id="enemy-hp-bar" class="hp-bar-inner bg-red-600 h-full" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Logs -->
+        <div class="absolute right-4 top-4 w-72 bg-black/70 p-4 rounded border border-gray-700 text-xs font-mono h-64 overflow-y-auto" id="log-container">
+            <div class="text-green-400">系统就绪...</div>
+        </div>
+    </main>
+
+    <!-- Bottom Controls -->
+    <footer class="p-8 bg-black/40 border-t border-gray-700 relative">
+        <div class="flex justify-center items-end gap-4 h-48" id="hand-container">
+            <!-- Cards will be injected here -->
+        </div>
+
+        <!-- UI Overlays -->
+        <div class="absolute left-10 bottom-10 flex flex-col items-center">
+            <div id="energy-display" class="w-16 h-16 rounded-full bg-blue-600 border-4 border-blue-300 flex items-center justify-center text-2xl font-bold shadow-lg shadow-blue-500/50">
+                3
+            </div>
+            <div class="text-xs mt-1 text-blue-300 font-bold uppercase">能量 (Energy)</div>
+        </div>
+
+        <div class="absolute right-10 bottom-10 flex flex-col gap-2">
+            <button id="next-level-btn" onclick="nextLevel()" class="hidden px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-xl border-b-4 border-green-900 active:border-b-0 active:translate-y-1 transition-all">
+                进入下一关
+            </button>
+            <button id="end-turn-btn" onclick="endTurn()" class="px-8 py-3 bg-orange-600 hover:bg-orange-700 rounded-lg font-bold text-xl border-b-4 border-orange-900 active:border-b-0 active:translate-y-1 transition-all">
+                结束回合
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        let gameState = {};
+        let dragCardId = null;
+        let startY = 0;
+
+        const STATE_MAP = {
+            "PLAYER_TURN": "玩家回合",
+            "ENEMY_TURN": "敌人回合",
+            "VICTORY": "战斗胜利",
+            "GAME_OVER": "游戏失败"
+        };
+
+        async function updateStatus() {
+            const res = await fetch('/api/game/status');
+            gameState = await res.json();
+            render();
+        }
+
+        async function playCard(instanceId) {
+            const res = await fetch(`/api/game/play/${instanceId}`, { method: 'POST' });
+            if (res.ok) {
+                gameState = await res.json();
+                render();
+            } else {
+                const err = await res.json();
+                alert(`错误: ${err.detail}`);
+            }
+        }
+
+        async function endTurn() {
+            const res = await fetch('/api/game/end-turn', { method: 'POST' });
+            gameState = await res.json();
+            render();
+        }
+
+        async function nextLevel() {
+            const res = await fetch('/api/game/next-level', { method: 'POST' });
+            gameState = await res.json();
+            render();
+        }
+
+        async function resetGame() {
+            const res = await fetch('/api/game/reset', { method: 'POST' });
+            gameState = await res.json();
+            render();
+        }
+
+        function renderStatus(containerId, statusMap) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            for (const [key, value] of Object.entries(statusMap)) {
+                if (value > 0) {
+                    const span = document.createElement('span');
+                    span.className = 'status-badge ' + (key === 'poison' ? 'bg-green-700' : (key === 'thorns' ? 'bg-orange-700' : 'bg-purple-700'));
+                    const nameMap = {'poison': '中毒', 'thorns': '荆棘', 'curse': '灾厄'};
+                    span.textContent = `${nameMap[key] || key} ${value}`;
+                    container.appendChild(span);
+                }
+            }
+        }
+
+        function render() {
+            // Update Stats
+            document.getElementById('level-display').textContent = `第 ${gameState.level} 关`;
+            document.getElementById('turn-display').textContent = `第 ${gameState.turn} 回合`;
+            document.getElementById('fsm-state').textContent = `状态: ${STATE_MAP[gameState.current_state] || gameState.current_state}`;
+            document.getElementById('energy-display').textContent = gameState.energy;
+            
+            // Player
+            const pHPPercent = (gameState.player.hp / gameState.player.max_hp) * 100;
+            document.getElementById('player-hp-bar').style.width = `${pHPPercent}%`;
+            document.getElementById('player-hp-text').textContent = `${gameState.player.hp} / ${gameState.player.max_hp}`;
+            document.getElementById('player-shield').textContent = gameState.player.shield;
+            document.getElementById('player-shield').classList.toggle('hidden', gameState.player.shield <= 0);
+            renderStatus('player-status', gameState.player.status);
+
+            // Enemy
+            const eHPPercent = (gameState.enemy.hp / gameState.enemy.max_hp) * 100;
+            document.getElementById('enemy-hp-bar').style.width = `${eHPPercent}%`;
+            document.getElementById('enemy-hp-text').textContent = `${gameState.enemy.hp} / ${gameState.enemy.max_hp}`;
+            document.getElementById('enemy-name').textContent = gameState.enemy.name;
+            document.getElementById('enemy-shield').textContent = gameState.enemy.shield;
+            document.getElementById('enemy-shield').classList.toggle('hidden', gameState.enemy.shield <= 0);
+            document.getElementById('enemy-state-tag').classList.toggle('hidden', gameState.enemy.state !== 'ENRAGED');
+            renderStatus('enemy-status', gameState.enemy.status);
+
+            // Logs
+            const logContainer = document.getElementById('log-container');
+            logContainer.innerHTML = '';
+            gameState.logs.forEach(log => {
+                const div = document.createElement('div');
+                if (log.includes('胜利')) div.className = 'text-yellow-400 font-bold';
+                else if (log.includes('失败')) div.className = 'text-red-500 font-bold';
+                else if (log.includes('---')) div.className = 'text-blue-300 border-y border-gray-800 my-1 py-1';
+                div.textContent = `> ${log}`;
+                logContainer.appendChild(div);
+            });
+            logContainer.scrollTop = logContainer.scrollHeight;
+
+            // Cards
+            const handContainer = document.getElementById('hand-container');
+            handContainer.innerHTML = '';
+            gameState.hand.forEach(card => {
+                const cardDiv = document.createElement('div');
+                // Simple color logic based on first effect
+                const type = card.effects[0].type;
+                const bgColor = type === 'damage' ? 'bg-red-800 border-red-400' : (type === 'defend' ? 'bg-blue-800 border-blue-400' : 'bg-green-800 border-green-400');
+                
+                cardDiv.className = `card w-32 h-44 rounded-lg border-2 p-2 flex flex-col justify-between shadow-xl ${bgColor}`;
+                cardDiv.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <span class="font-bold text-[10px]">${card.name}</span>
+                        <span class="bg-yellow-500 text-black rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">${card.cost}</span>
+                    </div>
+                    <div class="text-2xl self-center">${type === 'damage' ? '⚔️' : (type === 'defend' ? '🛡️' : '🧪')}</div>
+                    <div class="text-[9px] text-center leading-tight">${card.description}</div>
+                `;
+                
+                cardDiv.onmousedown = (e) => {
+                    if (gameState.current_state !== 'PLAYER_TURN') return;
+                    dragCardId = card.instance_id;
+                    startY = e.clientY;
+                };
+
+                handContainer.appendChild(cardDiv);
+            });
+
+            // Buttons
+            document.getElementById('next-level-btn').classList.toggle('hidden', gameState.current_state !== 'VICTORY');
+            document.getElementById('end-turn-btn').classList.toggle('hidden', gameState.current_state !== 'PLAYER_TURN');
+
+            if (gameState.current_state === 'GAME_OVER') {
+                setTimeout(() => {
+                    if(confirm(`游戏结束！是否重新开始？`)) resetGame();
+                }, 500);
+            }
+        }
+
+        // Global Mouse Up to detect "Swipe Up"
+        window.onmouseup = (e) => {
+            if (dragCardId !== null) {
+                const diff = startY - e.clientY;
+                if (diff > 80) { // If swiped up more than 80px
+                    playCard(dragCardId);
+                }
+                dragCardId = null;
+            }
+        };
+
+        // Initial Load
+        updateStatus();
+    </script>
+</body>
+</html>

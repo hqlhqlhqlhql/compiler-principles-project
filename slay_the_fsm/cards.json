@@ -1,0 +1,30 @@
+[
+  {
+    "id": "strike",
+    "name": "打击",
+    "cost": 1,
+    "effects": [
+      {"type": "damage", "value": 6}
+    ],
+    "description": "造成 6 点伤害"
+  },
+  {
+    "id": "defend",
+    "name": "防御",
+    "cost": 1,
+    "effects": [
+      {"type": "defend", "value": 5}
+    ],
+    "description": "获得 5 点护甲"
+  },
+  {
+    "id": "poison_stab",
+    "name": "中毒攻击",
+    "cost": 1,
+    "effects": [
+      {"type": "damage", "value": 5},
+      {"type": "apply_status", "status": "poison", "value": 3}
+    ],
+    "description": "造成 5 点伤害，施加 3 层中毒"
+  }
+]
