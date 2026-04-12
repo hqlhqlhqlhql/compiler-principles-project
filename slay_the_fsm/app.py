@@ -33,7 +33,9 @@ class Card(BaseModel):
 class GameState(BaseModel):
     player: Entity
     enemy: Entity
-    hand: List[Card] = []
+    deck: List[str] = []      # 抽牌堆 (card_id)
+    hand: List[Card] = []     # 当前手牌 (完整对象)
+    discard: List[str] = []   # 弃牌堆 (card_id)
     energy: int = 3
     max_energy: int = 3
     turn: int = 1
@@ -97,15 +99,20 @@ def enemy_act(enemy: Entity, player: Entity, state: GameState):
 class GameManager:
     def __init__(self):
         self.cards_pool = self._load_json("cards.json")
+        # 转化为字典便于快速查找
+        self.cards_dict = {c["id"]: c for c in self.cards_pool}
         self.enemies_data = self._load_json("enemies.json")
         self.levels_data = self._load_json("levels.json")
+        
+        # 实例 ID 计数器，保证唯一性
+        # self.card_instance_counter = 0
         
         # 验证必要数据是否加载
         if not self.levels_data:
             raise RuntimeError("CRITICAL: levels.json 无法加载或为空")
         if not self.enemies_data:
             raise RuntimeError("CRITICAL: enemies.json 无法加载或为空")
-        if not self.cards_pool:
+        if not self.cards_dict:
             raise RuntimeError("CRITICAL: cards.json 无法加载或为空")
             
         self.state = self.init_game()
@@ -116,6 +123,15 @@ class GameManager:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return []
+
+    def init_deck(self):
+        """初始化基础牌组"""
+        # 示例：5张打击，5张防御，1张中毒
+        basic_deck = ["strike"] * 5 + ["defend"] * 5 + ["poison_stab"] * 1
+        random.shuffle(basic_deck)
+        self.state.deck = basic_deck
+        self.state.discard = []
+        self.state.hand = []
 
     def init_game(self, level=1):
         # 加载关卡配置
@@ -130,38 +146,61 @@ class GameManager:
             actions=enemy_cfg.get("actions", {})
         )
         
-        game_state = GameState(
+        self.state = GameState(
             player=player,
             enemy=enemy,
             level=level,
             logs=[f"--- 第 {level} 关: {enemy.name} 出现了！ ---"]
         )
-        self.draw_cards(game_state, 5)
-        return game_state
+        # 初始化牌组并抽取首轮手牌
+        self.init_deck()
+        self.draw_cards(5)
+        return self.state
 
-    def draw_cards(self, state: GameState, count: int):
+    def draw_cards(self, count: int):
+        """循环抽牌逻辑"""
         for _ in range(count):
-            card_data = random.choice(self.cards_pool)
-            card = Card(**card_data)
-            card.instance_id = random.randint(1, 1000000)
-            state.hand.append(card)
+            # 1. 如果抽牌堆为空，将弃牌堆洗回抽牌堆
+            if not self.state.deck:
+                if not self.state.discard:
+                    self.state.logs.append("⚠️ 没牌可抽了！")
+                    break
+                self.state.logs.append("🔄 正在重新洗牌...")
+                self.state.deck = self.state.discard[:]
+                random.shuffle(self.state.deck)
+                self.state.discard = []
+
+            # 2. 抽牌
+            card_id = self.state.deck.pop()
+            card_data = self.cards_dict.get(card_id)
+            if card_data:
+                # 创建卡牌实例并赋予唯一递增 ID
+                card_instance = Card(**card_data)
+                # self.card_instance_counter += 1
+                card_instance.instance_id = random.randint(1, 1000000)
+                self.state.hand.append(card_instance)
 
     def play_card(self, instance_id: int):
         if self.state.current_state != "PLAYER_TURN":
             raise HTTPException(status_code=400, detail="不是玩家的回合")
         
-        card = next((c for c in self.state.hand if c.instance_id == instance_id), None)
-        if not card:
+        # 查找卡牌
+        card_idx = next((i for i, c in enumerate(self.state.hand) if c.instance_id == instance_id), -1)
+        if card_idx == -1:
             raise HTTPException(status_code=404, detail="卡牌未找到")
         
+        card = self.state.hand[card_idx]
         if self.state.energy < card.cost:
             raise HTTPException(status_code=400, detail="能量不足")
 
-        # 消耗能量并移除手牌
+        # 1. 消耗能量并移出手牌
         self.state.energy -= card.cost
-        self.state.hand = [c for c in self.state.hand if c.instance_id != instance_id]
+        played_card = self.state.hand.pop(card_idx)
         
-        # 执行卡牌效果
+        # 2. 放入弃牌堆
+        self.state.discard.append(played_card.id)
+        
+        # 3. 执行效果
         for effect in card.effects:
             apply_effect(effect, self.state.player, self.state.enemy, self.state)
 
@@ -182,6 +221,12 @@ class GameManager:
         if self.state.current_state != "PLAYER_TURN":
             return
 
+        # --- 回合结束逻辑 ---
+        # 1. 将手牌移动到弃牌堆
+        for card in self.state.hand:
+            self.state.discard.append(card.id)
+        self.state.hand = []
+
         # --- 转移到敌人回合 ---
         self.state.current_state = "ENEMY_TURN"
         self.state.logs.append(">>> 敌人回合开始")
@@ -201,7 +246,7 @@ class GameManager:
             self.state.turn += 1
             self.state.energy = self.state.max_energy
             self.state.player.shield = 0 # 玩家护甲每回合清空
-            self.draw_cards(self.state, 5 - len(self.state.hand)) # 补满 5 张
+            self.draw_cards(5) # 补满 5 张
             self.state.logs.append(f"--- 第 {self.state.turn} 回合 ---")
             
             # TODO: 玩家回合开始时触发玩家身上的状态 (如诅咒)
