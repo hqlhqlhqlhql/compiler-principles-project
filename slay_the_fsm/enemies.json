@@ -1,20 +1,141 @@
 [
   {
     "id": "slime",
-    "name": "史莱姆",
-    "max_hp": 30,
+    "name": "酸液史莱姆",
+    "max_hp": 34,
+    "initial_state": "BOUNCE",
     "actions": {
-      "NORMAL": {"damage": 6},
-      "ENRAGED": {"damage": 10}
+      "states": {
+        "BOUNCE": {
+          "intent": "弹跳撞击 6",
+          "effects": [
+            { "type": "damage", "value": 6 }
+          ],
+          "next_state": "SLIME_GUARD"
+        },
+        "SLIME_GUARD": {
+          "intent": "凝胶护甲 6",
+          "effects": [
+            { "type": "defend", "value": 6, "target": "self" }
+          ],
+          "next_state": "BOUNCE"
+        },
+        "SPLIT_FURY": {
+          "intent": "狂怒扑击 10",
+          "effects": [
+            { "type": "damage", "value": 10 }
+          ],
+          "next_state": "SLIME_GUARD"
+        }
+      },
+      "transitions": [
+        { "from": "ANY", "condition": "hp_below_half", "to": "SPLIT_FURY" }
+      ]
     }
   },
   {
-    "id": "goblin",
-    "name": "哥布林",
-    "max_hp": 50,
+    "id": "beetle",
+    "name": "尖刺甲虫",
+    "max_hp": 42,
+    "initial_state": "SHELL_UP",
     "actions": {
-      "NORMAL": {"damage": 8},
-      "ENRAGED": {"damage": 14}
+      "states": {
+        "SHELL_UP": {
+          "intent": "立壳防御",
+          "effects": [
+            { "type": "defend", "value": 8, "target": "self" },
+            { "type": "apply_status", "status": "thorns", "value": 2, "target": "self" }
+          ],
+          "next_state": "STAB"
+        },
+        "STAB": {
+          "intent": "尖刺突刺 7",
+          "effects": [
+            { "type": "damage", "value": 7 }
+          ],
+          "next_state": "SHELL_UP"
+        },
+        "BERSERK": {
+          "intent": "疯狂乱刺 11",
+          "effects": [
+            { "type": "damage", "value": 11 }
+          ],
+          "next_state": "SHELL_UP"
+        }
+      },
+      "transitions": [
+        { "from": "ANY", "condition": "hp_below_half", "to": "BERSERK" }
+      ]
+    }
+  },
+  {
+    "id": "cultist",
+    "name": "诅咒祭司",
+    "max_hp": 38,
+    "initial_state": "HEX",
+    "actions": {
+      "states": {
+        "HEX": {
+          "intent": "施加灾厄",
+          "effects": [
+            { "type": "apply_status", "status": "curse", "value": 1 }
+          ],
+          "next_state": "BOLT"
+        },
+        "BOLT": {
+          "intent": "暗影箭 6",
+          "effects": [
+            { "type": "damage", "value": 6 },
+            { "type": "apply_status", "status": "poison", "value": 1 }
+          ],
+          "next_state": "HEX"
+        },
+        "RITUAL": {
+          "intent": "黑暗仪式 9",
+          "effects": [
+            { "type": "damage", "value": 9 },
+            { "type": "apply_status", "status": "curse", "value": 1 }
+          ],
+          "next_state": "BOLT"
+        }
+      },
+      "transitions": [
+        { "from": "ANY", "condition": "hp_below_half", "to": "RITUAL" }
+      ]
+    }
+  },
+  {
+    "id": "golem",
+    "name": "重锤魔像",
+    "max_hp": 58,
+    "initial_state": "CHARGE",
+    "actions": {
+      "states": {
+        "CHARGE": {
+          "intent": "蓄力防御",
+          "effects": [
+            { "type": "defend", "value": 6, "target": "self" }
+          ],
+          "next_state": "SMASH"
+        },
+        "SMASH": {
+          "intent": "重锤猛击 15",
+          "effects": [
+            { "type": "damage", "value": 15 }
+          ],
+          "next_state": "CHARGE"
+        },
+        "OVERDRIVE": {
+          "intent": "过载砸击 18",
+          "effects": [
+            { "type": "damage", "value": 18 }
+          ],
+          "next_state": "CHARGE"
+        }
+      },
+      "transitions": [
+        { "from": "ANY", "condition": "hp_below_half", "to": "OVERDRIVE" }
+      ]
     }
   }
 ]

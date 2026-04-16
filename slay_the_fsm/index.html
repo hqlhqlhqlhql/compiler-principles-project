@@ -72,7 +72,7 @@
             <div class="w-32 h-48 bg-red-900 rounded-lg flex items-center justify-center border-4 border-red-400 shadow-lg shadow-red-500/50 relative">
                 <span id="enemy-icon" class="text-4xl">👹</span>
                 <div id="enemy-shield" class="absolute -top-4 -right-4 bg-gray-600 text-white px-2 py-1 rounded border-2 border-white font-bold hidden">0</div>
-                <div id="enemy-state-tag" class="absolute -bottom-4 bg-red-600 text-[10px] px-2 py-0.5 rounded border border-white hidden">狂暴</div>
+                <div id="enemy-state-tag" class="absolute -bottom-4 bg-red-600 text-[10px] px-2 py-0.5 rounded border border-white">弹跳</div>
             </div>
             <div class="w-48">
                 <div class="flex justify-between text-sm mb-1">
@@ -82,6 +82,7 @@
                 <div class="w-full bg-gray-700 h-4 rounded-full overflow-hidden border border-gray-600">
                     <div id="enemy-hp-bar" class="hp-bar-inner bg-red-600 h-full" style="width: 100%"></div>
                 </div>
+                <div id="enemy-intent" class="mt-2 text-center text-xs text-red-200">意图：弹跳撞击 6</div>
             </div>
         </div>
 
@@ -109,6 +110,9 @@
             <button id="next-level-btn" onclick="nextLevel()" class="hidden px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-xl border-b-4 border-green-900 active:border-b-0 active:translate-y-1 transition-all">
                 进入下一关
             </button>
+            <button id="restart-btn" onclick="resetGame()" class="hidden px-8 py-3 bg-slate-600 hover:bg-slate-700 rounded-lg font-bold text-xl border-b-4 border-slate-900 active:border-b-0 active:translate-y-1 transition-all">
+                重新开始
+            </button>
             <button id="end-turn-btn" onclick="endTurn()" class="px-8 py-3 bg-orange-600 hover:bg-orange-700 rounded-lg font-bold text-xl border-b-4 border-orange-900 active:border-b-0 active:translate-y-1 transition-all">
                 结束回合
             </button>
@@ -125,6 +129,21 @@
             "ENEMY_TURN": "敌人回合",
             "VICTORY": "战斗胜利",
             "GAME_OVER": "游戏失败"
+        };
+
+        const ENEMY_STATE_MAP = {
+            "BOUNCE": "弹跳",
+            "SLIME_GUARD": "凝胶护甲",
+            "SPLIT_FURY": "狂怒",
+            "SHELL_UP": "立壳",
+            "STAB": "突刺",
+            "BERSERK": "暴走",
+            "HEX": "咒印",
+            "BOLT": "暗影箭",
+            "RITUAL": "仪式",
+            "CHARGE": "蓄力",
+            "SMASH": "重击",
+            "OVERDRIVE": "过载"
         };
 
         async function updateStatus() {
@@ -152,8 +171,13 @@
 
         async function nextLevel() {
             const res = await fetch('/api/game/next-level', { method: 'POST' });
-            gameState = await res.json();
-            render();
+            if (res.ok) {
+                gameState = await res.json();
+                render();
+            } else {
+                const err = await res.json();
+                alert(`错误: ${err.detail}`);
+            }
         }
 
         async function resetGame() {
@@ -180,11 +204,14 @@
             // Update Stats
             document.getElementById('level-display').textContent = `第 ${gameState.level} 关`;
             document.getElementById('turn-display').textContent = `第 ${gameState.turn} 回合`;
-            document.getElementById('fsm-state').textContent = `状态: ${STATE_MAP[gameState.current_state] || gameState.current_state}`;
+            document.getElementById('fsm-state').textContent = gameState.run_completed
+                ? '状态: 全部关卡完成'
+                : `状态: ${STATE_MAP[gameState.current_state] || gameState.current_state}`;
             document.getElementById('energy-display').textContent = gameState.energy;
-            
+             
             // Player
             const pHPPercent = (gameState.player.hp / gameState.player.max_hp) * 100;
+            document.getElementById('player-name').textContent = gameState.player.name;
             document.getElementById('player-hp-bar').style.width = `${pHPPercent}%`;
             document.getElementById('player-hp-text').textContent = `${gameState.player.hp} / ${gameState.player.max_hp}`;
             document.getElementById('player-shield').textContent = gameState.player.shield;
@@ -196,9 +223,10 @@
             document.getElementById('enemy-hp-bar').style.width = `${eHPPercent}%`;
             document.getElementById('enemy-hp-text').textContent = `${gameState.enemy.hp} / ${gameState.enemy.max_hp}`;
             document.getElementById('enemy-name').textContent = gameState.enemy.name;
+            document.getElementById('enemy-intent').textContent = `意图：${gameState.enemy.intent || '未知'}`;
             document.getElementById('enemy-shield').textContent = gameState.enemy.shield;
             document.getElementById('enemy-shield').classList.toggle('hidden', gameState.enemy.shield <= 0);
-            document.getElementById('enemy-state-tag').classList.toggle('hidden', gameState.enemy.state !== 'ENRAGED');
+            document.getElementById('enemy-state-tag').textContent = ENEMY_STATE_MAP[gameState.enemy.state] || gameState.enemy.state;
             renderStatus('enemy-status', gameState.enemy.status);
 
             // Logs
@@ -219,17 +247,25 @@
             handContainer.innerHTML = '';
             gameState.hand.forEach(card => {
                 const cardDiv = document.createElement('div');
-                // Simple color logic based on first effect
                 const type = card.effects[0].type;
-                const bgColor = type === 'damage' ? 'bg-red-800 border-red-400' : (type === 'defend' ? 'bg-blue-800 border-blue-400' : 'bg-green-800 border-green-400');
-                
+                const styleMap = {
+                    'damage': ['bg-red-800 border-red-400', '⚔️'],
+                    'defend': ['bg-blue-800 border-blue-400', '🛡️'],
+                    'apply_status': ['bg-green-800 border-green-400', '🧪'],
+                    'draw_cards': ['bg-purple-800 border-purple-400', '📘'],
+                    'heal': ['bg-emerald-800 border-emerald-400', '✨'],
+                    'gain_energy': ['bg-yellow-700 border-yellow-300', '⚡'],
+                    'damage_if_target_has_status': ['bg-fuchsia-800 border-fuchsia-400', '☠️']
+                };
+                const [bgColor, icon] = styleMap[type] || ['bg-neutral-700 border-neutral-300', '🃏'];
+                 
                 cardDiv.className = `card w-32 h-44 rounded-lg border-2 p-2 flex flex-col justify-between shadow-xl ${bgColor}`;
                 cardDiv.innerHTML = `
                     <div class="flex justify-between items-start">
                         <span class="font-bold text-[10px]">${card.name}</span>
                         <span class="bg-yellow-500 text-black rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">${card.cost}</span>
                     </div>
-                    <div class="text-2xl self-center">${type === 'damage' ? '⚔️' : (type === 'defend' ? '🛡️' : '🧪')}</div>
+                    <div class="text-2xl self-center">${icon}</div>
                     <div class="text-[9px] text-center leading-tight">${card.description}</div>
                 `;
                 
@@ -243,14 +279,9 @@
             });
 
             // Buttons
-            document.getElementById('next-level-btn').classList.toggle('hidden', gameState.current_state !== 'VICTORY');
+            document.getElementById('next-level-btn').classList.toggle('hidden', gameState.current_state !== 'VICTORY' || gameState.run_completed);
+            document.getElementById('restart-btn').classList.toggle('hidden', !(gameState.current_state === 'GAME_OVER' || gameState.run_completed));
             document.getElementById('end-turn-btn').classList.toggle('hidden', gameState.current_state !== 'PLAYER_TURN');
-
-            if (gameState.current_state === 'GAME_OVER') {
-                setTimeout(() => {
-                    if(confirm(`游戏结束！是否重新开始？`)) resetGame();
-                }, 500);
-            }
         }
 
         // Global Mouse Up to detect "Swipe Up"
