@@ -4,7 +4,7 @@
     "name": "打击",
     "cost": 1,
     "effects": [
-      {"type": "damage", "value": 6}
+      { "type": "damage", "value": 6 }
     ],
     "description": "造成 6 点伤害"
   },
@@ -13,7 +13,7 @@
     "name": "防御",
     "cost": 1,
     "effects": [
-      {"type": "defend", "value": 5}
+      { "type": "defend", "value": 5, "target": "self" }
     ],
     "description": "获得 5 点护甲"
   },
@@ -22,9 +22,75 @@
     "name": "中毒攻击",
     "cost": 1,
     "effects": [
-      {"type": "damage", "value": 5},
-      {"type": "apply_status", "status": "poison", "value": 3}
+      { "type": "damage", "value": 5 },
+      { "type": "apply_status", "status": "poison", "value": 3 }
     ],
     "description": "造成 5 点伤害，施加 3 层中毒"
+  },
+  {
+    "id": "guard_spike",
+    "name": "反刺格挡",
+    "cost": 1,
+    "effects": [
+      { "type": "defend", "value": 6, "target": "self" },
+      { "type": "apply_status", "status": "thorns", "value": 1, "target": "self" }
+    ],
+    "description": "获得 6 点护甲，并获得 1 层荆棘"
+  },
+  {
+    "id": "tactical_insight",
+    "name": "战术洞察",
+    "cost": 1,
+    "effects": [
+      { "type": "draw_cards", "value": 2, "target": "self" }
+    ],
+    "description": "抽 2 张牌"
+  },
+  {
+    "id": "quick_patch",
+    "name": "快速包扎",
+    "cost": 1,
+    "effects": [
+      { "type": "heal", "value": 4, "target": "self" }
+    ],
+    "description": "恢复 4 点生命"
+  },
+  {
+    "id": "battle_focus",
+    "name": "战斗专注",
+    "cost": 0,
+    "effects": [
+      { "type": "gain_energy", "value": 1, "target": "self" },
+      { "type": "draw_cards", "value": 1, "target": "self" }
+    ],
+    "description": "获得 1 点能量，并抽 1 张牌"
+  },
+  {
+    "id": "toxic_burst",
+    "name": "毒爆",
+    "cost": 2,
+    "effects": [
+      { "type": "damage_if_target_has_status", "status": "poison", "value": 14, "fallback": 7 }
+    ],
+    "description": "若目标有中毒，则造成 14 点伤害，否则造成 7 点伤害"
+  },
+  {
+    "id": "curse_brand",
+    "name": "灾厄烙印",
+    "cost": 1,
+    "effects": [
+      { "type": "damage", "value": 4 },
+      { "type": "apply_status", "status": "curse", "value": 2 }
+    ],
+    "description": "造成 4 点伤害，并施加 2 层灾厄"
+  },
+  {
+    "id": "heavy_slash",
+    "name": "重斩",
+    "cost": 2,
+    "effects": [
+      { "type": "damage", "value": 11 }
+    ],
+    "description": "造成 11 点伤害"
   }
 ]
