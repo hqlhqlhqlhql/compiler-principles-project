@@ -18,8 +18,8 @@ class Entity(BaseModel):
     shield: int = 0
     status: Dict[str, int] = Field(default_factory=lambda: {"poison": 0, "thorns": 0, "curse": 0})
     state: str = "NORMAL"
-    intent: str = "" # 怪物意图显示
-    actions: Dict[str, Any] = {} # 怪物行为 FSM 配置
+    intent: str = "" 
+    actions: Dict[str, Any] = {}
 
 class Card(BaseModel):
     id: str
@@ -43,7 +43,7 @@ class GameState(BaseModel):
     logs: List[str] = []
     pending_actions: List[Dict[str, Any]] = []
 
-# ================== 核心逻辑系统 (合并版) ==================
+# ================== 核心系统：FSM 与 效果结算 ==================
 
 def check_survival(target: Entity, state: GameState):
     """统一检查死亡及灾厄斩杀线"""
@@ -52,14 +52,35 @@ def check_survival(target: Entity, state: GameState):
         target.hp = 0
         state.logs.append(f"💀 灾厄降临！{target.name} 因血量 ≤ {curse} 被直接斩杀！")
     
-    if target.hp <= 0:
-        target.hp = 0
+    if target.hp < 0: target.hp = 0
 
 def get_actual_target(effect: Dict[str, Any], source: Entity, target: Entity):
-    """支持 target: 'self' 逻辑"""
-    if effect.get("target") == "self":
-        return source, source
+    if effect.get("target") == "self": return source, source
     return source, target
+
+# --- 怪物 FSM 核心驱动 ---
+
+def update_enemy_intent(enemy: Entity):
+    """同步当前状态对应的意图描述文字"""
+    states_cfg = enemy.actions.get("states", {})
+    current_cfg = states_cfg.get(enemy.state)
+    if current_cfg:
+        enemy.intent = current_cfg.get("intent", "准备中...")
+
+def check_monster_transitions(enemy: Entity, state: GameState):
+    """实时检查怪物状态切换 (例如：血量低于 50% 立即进入狂暴并刷新意图)"""
+    actions_cfg = enemy.actions
+    transitions = actions_cfg.get("transitions", [])
+    changed = False
+    for trans in transitions:
+        if trans.get("condition") == "hp_below_half" and enemy.hp < (enemy.max_hp / 2):
+            if trans.get("from") == "ANY" or trans.get("from") == enemy.state:
+                if enemy.state != trans.get("to"):
+                    enemy.state = trans.get("to")
+                    state.logs.append(f"💢 {enemy.name} 进入了 {enemy.state} 状态！")
+                    changed = True
+    if changed:
+        update_enemy_intent(enemy)
 
 # --- 效果处理器 (Strategy Pattern) ---
 
@@ -69,56 +90,76 @@ def handle_damage(effect: Dict[str, Any], source: Entity, target: Entity, state:
     actual_damage = max(0, value - tgt.shield)
     tgt.shield = max(0, tgt.shield - value)
     tgt.hp -= actual_damage
-    state.logs.append(f"{src.name} 对 {tgt.name} 造成了 {value} 点伤害 (吸收 {value - actual_damage}，实际 {actual_damage})")
+    state.logs.append(f"{src.name} 对 {tgt.name} 造成了 {value} 点伤害 (吸收 {value - actual_damage})")
     
-    # 荆棘反弹 (仅当目标受到实际伤害且有荆棘时)
+    # 荆棘反弹
     if actual_damage > 0 and tgt.status.get("thorns", 0) > 0:
         thorn_dmg = tgt.status["thorns"]
         src.hp -= thorn_dmg
-        state.logs.append(f"🌵 {tgt.name} 的荆棘反弹了 {thorn_dmg} 点伤害给 {src.name}！")
+        state.logs.append(f"🌵 {tgt.name} 的荆棘反弹了 {thorn_dmg} 点伤害！")
         check_survival(src, state)
+        if src.name != "勇者": check_monster_transitions(src, state) # 怪物受反伤可能转相
     
     check_survival(tgt, state)
+    if tgt.name != "勇者": check_monster_transitions(tgt, state) # 怪物受直伤可能转相
+
+def handle_damage_if_status(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
+    src, tgt = get_actual_target(effect, source, target)
+    required_status = effect.get("status")
+    if tgt.status.get(required_status, 0) > 0:
+        value = effect.get("value", 0)
+        state.logs.append(f"💥 联动：{tgt.name} 处于 {required_status} 状态，触发强化打击！")
+        handle_damage({"value": value}, source, target, state)
+    else:
+        fallback = effect.get("fallback", 0)
+        handle_damage({"value": fallback}, source, target, state)
 
 def handle_defend(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     src, tgt = get_actual_target(effect, source, target)
     value = effect.get("value", 0)
     tgt.shield += value
-    state.logs.append(f"{tgt.name} 获得了 {value} 点护甲")
+    state.logs.append(f"{tgt.name} 获得 {value} 点护甲")
 
 def handle_apply_status(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     src, tgt = get_actual_target(effect, source, target)
     status_name = effect.get("status")
     value = effect.get("value", 0)
     tgt.status[status_name] = tgt.status.get(status_name, 0) + value
-    state.logs.append(f"✨ {tgt.name} 获得了 {value} 层 {status_name}")
+    state.logs.append(f"✨ {tgt.name} 获得 {value} 层 {status_name}")
+
+def handle_remove_status(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
+    src, tgt = get_actual_target(effect, source, target)
+    status_name = effect.get("status")
+    tgt.status[status_name] = 0
+    state.logs.append(f"🧹 {tgt.name} 的 {status_name} 被清除")
 
 def handle_draw_cards(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     value = effect.get("value", 1)
     state.pending_actions.append({"type": "draw", "value": value})
-    state.logs.append(f"📝 准备抽取 {value} 张牌")
 
 def handle_heal(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     src, tgt = get_actual_target(effect, source, target)
     value = effect.get("value", 0)
     heal = min(value, tgt.max_hp - tgt.hp)
     tgt.hp += heal
-    state.logs.append(f"❤️ {tgt.name} 恢复了 {heal} 点生命")
+    state.logs.append(f"❤️ {tgt.name} 恢复了 {heal} 生命")
 
 def handle_gain_energy(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     value = effect.get("value", 0)
     state.energy += value
-    state.logs.append(f"⚡ 获得了 {value} 点能量")
+    state.logs.append(f"⚡ 能量 +{value}")
 
 def handle_break_shield(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     _, tgt = get_actual_target(effect, source, target)
     tgt.shield = 0
-    state.logs.append(f"🔨 {tgt.name} 的护盾被击碎！")
+    state.logs.append(f"🔨 {tgt.name} 的护盾粉碎了！")
 
 EFFECT_HANDLERS = {
     "damage": handle_damage,
+    "damage_if_target_has_status": handle_damage_if_status,
     "defend": handle_defend,
     "apply_status": handle_apply_status,
+    "remove_status": handle_remove_status,
     "draw_cards": handle_draw_cards,
     "heal": handle_heal,
     "gain_energy": handle_gain_energy,
@@ -127,58 +168,41 @@ EFFECT_HANDLERS = {
 
 def apply_effect(effect: Dict[str, Any], source: Entity, target: Entity, state: GameState):
     handler = EFFECT_HANDLERS.get(effect.get("type"))
-    if handler:
-        handler(effect, source, target, state)
-    else:
-        state.logs.append(f"❓ 未知效果类型: {effect.get('type')}")
+    if handler: handler(effect, source, target, state)
+    else: state.logs.append(f"❓ 未知效果: {effect.get('type')}")
 
 def apply_status_effects(entity: Entity, state: GameState):
-    """状态回合结算"""
+    """每回合状态结算"""
     poison = entity.status.get("poison", 0)
     if poison > 0:
         entity.hp -= poison
         entity.status["poison"] -= 1
-        state.logs.append(f"🧪 {entity.name} 受到 {poison} 点中毒伤害，剩余 {entity.status['poison']} 层")
+        state.logs.append(f"🧪 {entity.name} 中毒损血 {poison}")
         check_survival(entity, state)
+        if entity.name != "勇者": check_monster_transitions(entity, state) # 中毒损血也可能转相
 
-# --- 敌人行为 FSM 逻辑 (整合版) ---
-
-def update_enemy_intent(enemy: Entity):
-    """根据当前状态更新意图显示"""
-    states_cfg = enemy.actions.get("states", {})
-    current_cfg = states_cfg.get(enemy.state)
-    if current_cfg:
-        enemy.intent = current_cfg.get("intent", "未知行动")
+# --- 敌人行动执行 ---
 
 def enemy_act(enemy: Entity, player: Entity, state: GameState):
-    """执行怪物 FSM 行为"""
-    actions_cfg = enemy.actions
-    states_cfg = actions_cfg.get("states", {})
+    # 行动前再次确认状态
+    check_monster_transitions(enemy, state)
     
-    # 1. 检查状态转换条件 (例如血量低于一半)
-    transitions = actions_cfg.get("transitions", [])
-    for trans in transitions:
-        if trans.get("condition") == "hp_below_half" and enemy.hp < (enemy.max_hp / 2):
-            if trans.get("from") == "ANY" or trans.get("from") == enemy.state:
-                if enemy.state != trans.get("to"):
-                    enemy.state = trans.get("to")
-                    state.logs.append(f"💢 {enemy.name} 的状态发生了改变！")
-    
-    # 2. 执行当前状态的效果
+    states_cfg = enemy.actions.get("states", {})
     current_cfg = states_cfg.get(enemy.state)
-    if not current_cfg:
-        state.logs.append(f"⚠️ 无法找到怪物状态: {enemy.state}")
-        return
+    if not current_cfg: return
 
-    state.logs.append(f"👹 {enemy.name} 行动: {current_cfg.get('intent')}")
+    state.logs.append(f"👹 {enemy.name} 执行：{enemy.intent}")
     for effect in current_cfg.get("effects", []):
         apply_effect(effect, enemy, player, state)
     
-    # 3. 转移到下一个状态 (如果定义了)
+    check_survival(enemy, state)
+    check_survival(player, state)
+
+    # 循环状态转移
     if "next_state" in current_cfg:
         enemy.state = current_cfg["next_state"]
     
-    # 4. 预告下一次意图
+    # 预告下回合意图
     update_enemy_intent(enemy)
 
 # --- 游戏管理器 ---
@@ -195,12 +219,10 @@ class GameManager:
     def _load_json(self, filename):
         path = os.path.join(BASE_DIR, filename)
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(path, "r", encoding="utf-8") as f: return json.load(f)
         return []
 
     def init_deck(self):
-        # 初始牌组（使用所有卡牌各一张作为演示）
         basic_deck = list(self.cards_dict.keys()) * 2
         random.shuffle(basic_deck)
         self.state.deck = basic_deck
@@ -234,7 +256,6 @@ class GameManager:
                 self.state.deck = self.state.discard[:]
                 random.shuffle(self.state.deck)
                 self.state.discard = []
-            
             card_id = self.state.deck.pop()
             card_data = self.cards_dict.get(card_id)
             if card_data:
@@ -246,13 +267,10 @@ class GameManager:
     def process_pending_actions(self):
         while self.state.pending_actions:
             act = self.state.pending_actions.pop(0)
-            if act["type"] == "draw":
-                self.draw_cards(act["value"])
+            if act["type"] == "draw": self.draw_cards(act["value"])
 
     def play_card(self, instance_id: int):
-        if self.state.current_state != "PLAYER_TURN":
-            raise HTTPException(status_code=400, detail="不是玩家回合")
-        
+        if self.state.current_state != "PLAYER_TURN": raise HTTPException(status_code=400, detail="不是玩家回合")
         card_idx = next((i for i, c in enumerate(self.state.hand) if c.instance_id == instance_id), -1)
         if card_idx == -1: raise HTTPException(status_code=404, detail="卡牌未找到")
         
@@ -262,6 +280,7 @@ class GameManager:
         self.state.energy -= card.cost
         played = self.state.hand.pop(card_idx)
         self.state.discard.append(played.id)
+        self.state.logs.append(f"玩家打出了【{played.name}】")
         
         for effect in card.effects:
             apply_effect(effect, self.state.player, self.state.enemy, self.state)
@@ -281,14 +300,11 @@ class GameManager:
 
     def end_turn(self):
         if self.state.current_state != "PLAYER_TURN": return
-
-        # 玩家回合结束
         for c in self.state.hand: self.state.discard.append(c.id)
         self.state.hand = []
         self.state.current_state = "ENEMY_TURN"
         self.state.logs.append(">>> 敌人回合开始")
         
-        # 敌人结算
         apply_status_effects(self.state.enemy, self.state)
         self.check_battle_end()
         
@@ -297,7 +313,6 @@ class GameManager:
             self.process_pending_actions()
             self.check_battle_end()
 
-        # 回到玩家回合
         if self.state.current_state == "ENEMY_TURN":
             self.state.current_state = "PLAYER_TURN"
             self.state.turn += 1
@@ -323,12 +338,10 @@ manager = GameManager()
 
 @app.get("/", response_class=HTMLResponse)
 def get_index():
-    with open(os.path.join(BASE_DIR, "index.html"), "r", encoding="utf-8") as f:
-        return f.read()
+    with open(os.path.join(BASE_DIR, "index.html"), "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/game/status")
-def get_status():
-    return manager.state
+def get_status(): return manager.state
 
 @app.post("/api/game/play/{instance_id}")
 def play_card(instance_id: int):
