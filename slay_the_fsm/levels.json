@@ -5,6 +5,14 @@
   },
   {
     "level": 2,
-    "enemy_id": "goblin"
+    "enemy_id": "beetle"
+  },
+  {
+    "level": 3,
+    "enemy_id": "cultist"
+  },
+  {
+    "level": 4,
+    "enemy_id": "golem"
   }
 ]
