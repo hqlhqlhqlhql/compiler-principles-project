@@ -1,0 +1,51 @@
+// test1.sy - legal SysY code for lexer testing
+const int MAX = 100;
+const float PI = 3.14;
+
+int global_var;
+
+int add(int a, int b) {
+    return a + b;
+}
+
+float compute(float x, float y) {
+    float result;
+    result = x * y + x / y - x % 2;
+    return result;
+}
+
+int main() {
+    int x;
+    int y;
+    int arr[10];
+    float f;
+    float matrix[3][3];
+
+    x = 42;
+    y = 017;
+    f = 3.14;
+
+    arr[0] = 0xFF;
+    arr[1] = 0X1A;
+
+    if (x > 0 && y != 0) {
+        x = x + 1;
+    } else {
+        x = 0;
+    }
+
+    while (x <= 100) {
+        x = x + 1;
+        if (x == 50) {
+            continue;
+        }
+        if (x == 80) {
+            break;
+        }
+    }
+
+    x = add(x, y);
+    f = compute(1.0, 2.0);
+
+    return 0;
+}

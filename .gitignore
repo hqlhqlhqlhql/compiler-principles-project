@@ -2,3 +2,14 @@
 __pycache__/
 *.pyc
 slay_the_fsm/venv/
+
+lexer/tdm64-gcc-10.3.0-2/
+lexer/tdm64-gcc-10.3.0-2.zip
+lexer/win_flex_bison3-latest/
+lexer/win_flex_bison3-latest.zip
+lexer/flex.pdf
+lexer/bison.pdf
+lexer/2022SysY+语言定义.doc
+lexer/sysy_definition.txt
+lexer/lex.yy.c
+lexer/lexer.exe
